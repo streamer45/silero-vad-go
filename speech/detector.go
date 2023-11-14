@@ -65,6 +65,7 @@ type Detector struct {
 	sessionOpts *C.OrtSessionOptions
 	session     *C.OrtSession
 	memoryInfo  *C.OrtMemoryInfo
+	cStrings    map[string]*C.char
 
 	cfg DetectorConfig
 
@@ -82,7 +83,8 @@ func NewDetector(cfg DetectorConfig) (*Detector, error) {
 	}
 
 	sd := Detector{
-		cfg: cfg,
+		cfg:      cfg,
+		cStrings: map[string]*C.char{},
 	}
 
 	sd.api = C.OrtGetApi()
@@ -90,7 +92,8 @@ func NewDetector(cfg DetectorConfig) (*Detector, error) {
 		return nil, fmt.Errorf("failed to get API")
 	}
 
-	status := C.OrtApiCreateEnv(sd.api, C.ORT_LOGGING_LEVEL_WARNING, C.CString("vad"), &sd.env)
+	sd.cStrings["loggerName"] = C.CString("vad")
+	status := C.OrtApiCreateEnv(sd.api, C.ORT_LOGGING_LEVEL_WARNING, sd.cStrings["loggerName"], &sd.env)
 	defer C.OrtApiReleaseStatus(sd.api, status)
 	if status != nil {
 		return nil, fmt.Errorf("failed to create env: %s", C.GoString(C.OrtApiGetErrorMessage(sd.api, status)))
@@ -120,7 +123,8 @@ func NewDetector(cfg DetectorConfig) (*Detector, error) {
 		return nil, fmt.Errorf("failed to set session graph optimization level: %s", C.GoString(C.OrtApiGetErrorMessage(sd.api, status)))
 	}
 
-	status = C.OrtApiCreateSession(sd.api, sd.env, C.CString(sd.cfg.ModelPath), sd.sessionOpts, &sd.session)
+	sd.cStrings["modelPath"] = C.CString(sd.cfg.ModelPath)
+	status = C.OrtApiCreateSession(sd.api, sd.env, sd.cStrings["modelPath"], sd.sessionOpts, &sd.session)
 	defer C.OrtApiReleaseStatus(sd.api, status)
 	if status != nil {
 		return nil, fmt.Errorf("failed to create session: %s", C.GoString(C.OrtApiGetErrorMessage(sd.api, status)))
@@ -131,6 +135,14 @@ func NewDetector(cfg DetectorConfig) (*Detector, error) {
 	if status != nil {
 		return nil, fmt.Errorf("failed to create memory info: %s", C.GoString(C.OrtApiGetErrorMessage(sd.api, status)))
 	}
+
+	sd.cStrings["input"] = C.CString("input")
+	sd.cStrings["sr"] = C.CString("sr")
+	sd.cStrings["h"] = C.CString("h")
+	sd.cStrings["c"] = C.CString("c")
+	sd.cStrings["output"] = C.CString("output")
+	sd.cStrings["hn"] = C.CString("hn")
+	sd.cStrings["cn"] = C.CString("cn")
 
 	return &sd, nil
 }
@@ -180,16 +192,17 @@ func (sd *Detector) infer(pcm []float32) (float32, error) {
 	// Run inference
 	inputs := []*C.OrtValue{pcmValue, rateValue, hValue, cValue}
 	outputs := []*C.OrtValue{nil, nil, nil}
+
 	inputNames := []*C.char{
-		C.CString("input"),
-		C.CString("sr"),
-		C.CString("h"),
-		C.CString("c"),
+		sd.cStrings["input"],
+		sd.cStrings["sr"],
+		sd.cStrings["h"],
+		sd.cStrings["c"],
 	}
 	outputNames := []*C.char{
-		C.CString("output"),
-		C.CString("hn"),
-		C.CString("cn"),
+		sd.cStrings["output"],
+		sd.cStrings["hn"],
+		sd.cStrings["cn"],
 	}
 	status = C.OrtApiRun(sd.api, sd.session, nil, &inputNames[0], &inputs[0], C.size_t(len(inputNames)), &outputNames[0], C.size_t(len(outputNames)), &outputs[0])
 	defer C.OrtApiReleaseStatus(sd.api, status)
@@ -334,6 +347,9 @@ func (sd *Detector) Destroy() error {
 	C.OrtApiReleaseSession(sd.api, sd.session)
 	C.OrtApiReleaseSessionOptions(sd.api, sd.sessionOpts)
 	C.OrtApiReleaseEnv(sd.api, sd.env)
+	for _, ptr := range sd.cStrings {
+		C.free(unsafe.Pointer(ptr))
+	}
 
 	return nil
 }
