@@ -269,6 +269,12 @@ func (sd *Detector) Detect(pcm []float32) ([]Segment, error) {
 		if speechProb >= sd.cfg.Threshold && !sd.triggered {
 			sd.triggered = true
 			speechStartAt := (float64(sd.currSample-sd.cfg.WindowSize-speechPadSamples) / float64(sd.cfg.SampleRate))
+
+			// We clamp at zero since due to padding the starting position could be negative.
+			if speechStartAt < 0 {
+				speechStartAt = 0
+			}
+
 			slog.Debug("speech start", slog.Float64("startAt", speechStartAt))
 			segments = append(segments, Segment{
 				SpeechStartAt: speechStartAt,
