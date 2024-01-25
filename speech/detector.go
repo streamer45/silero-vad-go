@@ -26,8 +26,12 @@ type DetectorConfig struct {
 	Threshold float32
 	// The duration of silence to wait for each speech segment before separating it.
 	MinSilenceDurationMs int
+	// The duration of speech to wait for before starting a speech segment.
+	MinSpeechDurationMs int
 	// The padding to add to speech segments to avoid aggressive cutting.
 	SpeechPadMs int
+	// The padding to add to silence segments to avoid aggressive zeroing.
+	SilencePadMs int
 }
 
 func (c DetectorConfig) IsValid() error {
@@ -52,8 +56,16 @@ func (c DetectorConfig) IsValid() error {
 		return fmt.Errorf("invalid MinSilenceDurationMs: should be a positive number")
 	}
 
+	if c.MinSpeechDurationMs < 0 {
+		return fmt.Errorf("invalid MinSpeechDurationMs: should be a positive number")
+	}
+
 	if c.SpeechPadMs < 0 {
 		return fmt.Errorf("invalid SpeechPadMs: should be a positive number")
+	}
+
+	if c.SilencePadMs < 0 {
+		return fmt.Errorf("invalid SilencePadMs: should be a positive number")
 	}
 
 	return nil
@@ -150,9 +162,9 @@ func NewDetector(cfg DetectorConfig) (*Detector, error) {
 func (sd *Detector) infer(pcm []float32) (float32, error) {
 	// Create tensors
 	var pcmValue *C.OrtValue
-	pcmInputDims := []C.long{
+	pcmInputDims := []C.longlong{
 		1,
-		C.long(len(pcm)),
+		C.longlong(len(pcm)),
 	}
 	status := C.OrtApiCreateTensorWithDataAsOrtValue(sd.api, sd.memoryInfo, unsafe.Pointer(&pcm[0]), C.size_t(len(pcm)*4), &pcmInputDims[0], C.size_t(len(pcmInputDims)), C.ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &pcmValue)
 	defer C.OrtApiReleaseStatus(sd.api, status)
@@ -162,7 +174,7 @@ func (sd *Detector) infer(pcm []float32) (float32, error) {
 	defer C.OrtApiReleaseValue(sd.api, pcmValue)
 
 	var rateValue *C.OrtValue
-	rateInputDims := []C.long{1}
+	rateInputDims := []C.longlong{1}
 	rate := []C.int64_t{C.int64_t(sd.cfg.SampleRate)}
 	status = C.OrtApiCreateTensorWithDataAsOrtValue(sd.api, sd.memoryInfo, unsafe.Pointer(&rate[0]), C.size_t(8), &rateInputDims[0], C.size_t(len(rateInputDims)), C.ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &rateValue)
 	defer C.OrtApiReleaseStatus(sd.api, status)
@@ -171,7 +183,7 @@ func (sd *Detector) infer(pcm []float32) (float32, error) {
 	}
 	defer C.OrtApiReleaseValue(sd.api, rateValue)
 
-	hcNodeInputDims := []C.long{2, 1, 64}
+	hcNodeInputDims := []C.longlong{2, 1, 64}
 
 	var hValue *C.OrtValue
 	status = C.OrtApiCreateTensorWithDataAsOrtValue(sd.api, sd.memoryInfo, unsafe.Pointer(&sd.h[0]), C.size_t(hcLen*4), &hcNodeInputDims[0], C.size_t(len(hcNodeInputDims)), C.ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &hValue)
@@ -320,6 +332,133 @@ func (sd *Detector) Detect(pcm []float32) ([]Segment, error) {
 	slog.Debug("speech detection done", slog.Int("segmentsLen", len(segments)))
 
 	return segments, nil
+}
+
+type RealtimeSegment struct {
+	Start   int
+	End     int
+	Silence bool
+}
+
+// DetectRealtime returns the `cleaned` pcm (silence is fully zeroed out to improve transcriber accuracy),
+// and the voice and silence segments are detected and recorded in `segments`.
+func (sd *Detector) DetectRealtime(pcm []float32) (cleaned []float32, segments []RealtimeSegment, retErr error) {
+	if sd == nil {
+		retErr = fmt.Errorf("invalid nil detector")
+		return
+	}
+
+	if len(pcm) < sd.cfg.WindowSize {
+		retErr = fmt.Errorf("not enough samples")
+		return
+	}
+
+	cleaned = make([]float32, 0, len(pcm))
+	cleaned = append(cleaned, pcm...)
+
+	minSilenceSamples := sd.cfg.MinSilenceDurationMs * sd.cfg.SampleRate / 1000
+	minSpeechSamples := sd.cfg.MinSpeechDurationMs * sd.cfg.SampleRate / 1000
+	speechPadSamples := sd.cfg.SpeechPadMs * sd.cfg.SampleRate / 1000
+	tempEndSpeech := 0
+	triggeredSpeech := false
+	currStartSpeech := 0
+	tempStartSpeech := 0
+
+	currStartSilence := 0
+
+	for i := 0; i <= len(cleaned)-sd.cfg.WindowSize; i += sd.cfg.WindowSize {
+		speechProb, err := sd.infer(cleaned[i : i+sd.cfg.WindowSize])
+		if err != nil {
+			retErr = fmt.Errorf("infer failed: %w", err)
+			return
+		}
+
+		currSampleStart := i
+		currSampleEnd := i + sd.cfg.WindowSize
+
+		if speechProb >= sd.cfg.Threshold {
+			if tempStartSpeech == 0 {
+				tempStartSpeech = currSampleStart
+			}
+			// Not enough speech samples yet to declare this a speech segment, we continue.
+			if currSampleEnd-tempStartSpeech < minSpeechSamples {
+				continue
+			}
+
+			if tempEndSpeech != 0 {
+				tempEndSpeech = 0
+			}
+
+			if !triggeredSpeech {
+				triggeredSpeech = true
+				startSpeech := tempStartSpeech - speechPadSamples
+				startSpeech = max(startSpeech, 0)
+				currStartSpeech = startSpeech
+				endSilence := startSpeech
+
+				// only record silence if it reached the threshold
+				if endSilence-currStartSilence >= minSilenceSamples {
+					// zero out silence, and record it as a segment
+					for j := currStartSilence; j < endSilence; j++ {
+						cleaned[j] = 0
+					}
+					segments = append(segments, RealtimeSegment{
+						Start:   currStartSilence,
+						End:     endSilence,
+						Silence: true,
+					})
+				}
+
+				//slog.Debug("speech start", slog.Float64("startAt", speechStartAt))
+			}
+		}
+
+		if speechProb < (sd.cfg.Threshold-0.15) && triggeredSpeech {
+			if tempEndSpeech == 0 {
+				tempEndSpeech = currSampleStart
+			}
+
+			// Not enough silence yet to split, we continue.
+			if currSampleEnd-tempEndSpeech < minSilenceSamples {
+				continue
+			}
+
+			// enough silence
+			triggeredSpeech = false
+			endSample := tempEndSpeech + speechPadSamples
+			endSample = min(endSample, len(cleaned))
+			currEnd := endSample
+			currStartSilence = endSample
+			tempStartSpeech = 0
+			tempEndSpeech = 0
+			//slog.Debug("speech end", slog.Float64("endAt", speechEndAt))
+
+			segments = append(segments, RealtimeSegment{
+				Start: currStartSpeech,
+				End:   currEnd,
+			})
+		}
+	}
+
+	// close off current sample
+	if triggeredSpeech {
+		segments = append(segments, RealtimeSegment{
+			Start: currStartSpeech,
+			End:   len(cleaned),
+		})
+	} else {
+		// zero out silence, and record it as a segment
+		for j := currStartSilence; j < len(cleaned); j++ {
+			cleaned[j] = 0
+		}
+		segments = append(segments, RealtimeSegment{
+			Start:   currStartSilence,
+			End:     len(cleaned),
+			Silence: true,
+		})
+	}
+
+	return
 }
 
 func (sd *Detector) Reset() error {
