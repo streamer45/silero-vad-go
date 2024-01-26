@@ -8,6 +8,7 @@ import "C"
 import (
 	"fmt"
 	"log/slog"
+	"runtime"
 	"unsafe"
 )
 
@@ -162,9 +163,16 @@ func NewDetector(cfg DetectorConfig) (*Detector, error) {
 func (sd *Detector) infer(pcm []float32) (float32, error) {
 	// Create tensors
 	var pcmValue *C.OrtValue
-	pcmInputDims := []C.long{
+
+	var pcmInputDims []any = []C.long{
 		1,
-		C.long(len(pcm)),
+		C.longlong(len(pcm)),
+	}
+	if runtime.GOOS == "darwin" {
+		pcmInputDims = []C.longlong{
+			1,
+			C.longlong(len(pcm)),
+		}
 	}
 	status := C.OrtApiCreateTensorWithDataAsOrtValue(sd.api, sd.memoryInfo, unsafe.Pointer(&pcm[0]), C.size_t(len(pcm)*4), &pcmInputDims[0], C.size_t(len(pcmInputDims)), C.ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &pcmValue)
 	defer C.OrtApiReleaseStatus(sd.api, status)
@@ -174,7 +182,12 @@ func (sd *Detector) infer(pcm []float32) (float32, error) {
 	defer C.OrtApiReleaseValue(sd.api, pcmValue)
 
 	var rateValue *C.OrtValue
-	rateInputDims := []C.long{1}
+
+	var rateInputDims []any = []C.long{1}
+	if runtime.GOOS == "darwin" {
+		rateInputDims = []C.longlong{1}
+	}
+
 	rate := []C.int64_t{C.int64_t(sd.cfg.SampleRate)}
 	status = C.OrtApiCreateTensorWithDataAsOrtValue(sd.api, sd.memoryInfo, unsafe.Pointer(&rate[0]), C.size_t(8), &rateInputDims[0], C.size_t(len(rateInputDims)), C.ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64, &rateValue)
 	defer C.OrtApiReleaseStatus(sd.api, status)
@@ -183,7 +196,10 @@ func (sd *Detector) infer(pcm []float32) (float32, error) {
 	}
 	defer C.OrtApiReleaseValue(sd.api, rateValue)
 
-	hcNodeInputDims := []C.long{2, 1, 64}
+	var hcNodeInputDims []any = []C.long{2, 1, 64}
+	if runtime.GOOS == "darwin" {
+		hcNodeInputDims = []C.longlong{2, 1, 64}
+	}
 
 	var hValue *C.OrtValue
 	status = C.OrtApiCreateTensorWithDataAsOrtValue(sd.api, sd.memoryInfo, unsafe.Pointer(&sd.h[0]), C.size_t(hcLen*4), &hcNodeInputDims[0], C.size_t(len(hcNodeInputDims)), C.ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, &hValue)
