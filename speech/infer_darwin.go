@@ -2,7 +2,11 @@
 
 package speech
 
+// #cgo CFLAGS: -Wall -Werror -std=c99
+// #cgo LDFLAGS: -lonnxruntime
+// #include "ort_bridge.h"
 import "C"
+
 import (
 	"fmt"
 	"unsafe"

@@ -2,6 +2,16 @@
 
 package speech
 
+// #cgo CFLAGS: -Wall -Werror -std=c99
+// #cgo LDFLAGS: -lonnxruntime
+// #include "ort_bridge.h"
+import "C"
+
+import (
+	"fmt"
+	"unsafe"
+)
+
 func (sd *Detector) infer(pcm []float32) (float32, error) {
 	// Create tensors
 	var pcmValue *C.OrtValue
