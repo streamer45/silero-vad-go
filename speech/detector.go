@@ -26,12 +26,8 @@ type DetectorConfig struct {
 	Threshold float32
 	// The duration of silence to wait for each speech segment before separating it.
 	MinSilenceDurationMs int
-	// The duration of speech to wait for before starting a speech segment.
-	MinSpeechDurationMs int
 	// The padding to add to speech segments to avoid aggressive cutting.
 	SpeechPadMs int
-	// The padding to add to silence segments to avoid aggressive zeroing.
-	SilencePadMs int
 }
 
 func (c DetectorConfig) IsValid() error {
@@ -56,16 +52,8 @@ func (c DetectorConfig) IsValid() error {
 		return fmt.Errorf("invalid MinSilenceDurationMs: should be a positive number")
 	}
 
-	if c.MinSpeechDurationMs < 0 {
-		return fmt.Errorf("invalid MinSpeechDurationMs: should be a positive number")
-	}
-
 	if c.SpeechPadMs < 0 {
 		return fmt.Errorf("invalid SpeechPadMs: should be a positive number")
-	}
-
-	if c.SilencePadMs < 0 {
-		return fmt.Errorf("invalid SilencePadMs: should be a positive number")
 	}
 
 	return nil
@@ -235,133 +223,6 @@ func (sd *Detector) Detect(pcm []float32) ([]Segment, error) {
 	slog.Debug("speech detection done", slog.Int("segmentsLen", len(segments)))
 
 	return segments, nil
-}
-
-type RealtimeSegment struct {
-	Start   int
-	End     int
-	Silence bool
-}
-
-// DetectRealtime returns the `cleaned` pcm (silence is fully zeroed out to improve transcriber accuracy),
-// and the voice and silence segments are detected and recorded in `segments`.
-func (sd *Detector) DetectRealtime(pcm []float32) (cleaned []float32, segments []RealtimeSegment, retErr error) {
-	if sd == nil {
-		retErr = fmt.Errorf("invalid nil detector")
-		return
-	}
-
-	if len(pcm) < sd.cfg.WindowSize {
-		retErr = fmt.Errorf("not enough samples")
-		return
-	}
-
-	cleaned = make([]float32, 0, len(pcm))
-	cleaned = append(cleaned, pcm...)
-
-	minSilenceSamples := sd.cfg.MinSilenceDurationMs * sd.cfg.SampleRate / 1000
-	minSpeechSamples := sd.cfg.MinSpeechDurationMs * sd.cfg.SampleRate / 1000
-	speechPadSamples := sd.cfg.SpeechPadMs * sd.cfg.SampleRate / 1000
-	tempEndSpeech := 0
-	triggeredSpeech := false
-	currStartSpeech := 0
-	tempStartSpeech := 0
-
-	currStartSilence := 0
-
-	for i := 0; i <= len(cleaned)-sd.cfg.WindowSize; i += sd.cfg.WindowSize {
-		speechProb, err := sd.infer(cleaned[i : i+sd.cfg.WindowSize])
-		if err != nil {
-			retErr = fmt.Errorf("infer failed: %w", err)
-			return
-		}
-
-		currSampleStart := i
-		currSampleEnd := i + sd.cfg.WindowSize
-
-		if speechProb >= sd.cfg.Threshold {
-			if tempStartSpeech == 0 {
-				tempStartSpeech = currSampleStart
-			}
-			// Not enough speech samples yet to declare this a speech segment, we continue.
-			if currSampleEnd-tempStartSpeech < minSpeechSamples {
-				continue
-			}
-
-			if tempEndSpeech != 0 {
-				tempEndSpeech = 0
-			}
-
-			if !triggeredSpeech {
-				triggeredSpeech = true
-				startSpeech := tempStartSpeech - speechPadSamples
-				startSpeech = max(startSpeech, 0)
-				currStartSpeech = startSpeech
-				endSilence := startSpeech
-
-				// only record silence if it reached the threshold
-				if endSilence-currStartSilence >= minSilenceSamples {
-					// zero out silence, and record it as a segment
-					for j := currStartSilence; j < endSilence; j++ {
-						cleaned[j] = 0
-					}
-					segments = append(segments, RealtimeSegment{
-						Start:   currStartSilence,
-						End:     endSilence,
-						Silence: true,
-					})
-				}
-
-				//slog.Debug("speech start", slog.Float64("startAt", speechStartAt))
-			}
-		}
-
-		if speechProb < (sd.cfg.Threshold-0.15) && triggeredSpeech {
-			if tempEndSpeech == 0 {
-				tempEndSpeech = currSampleStart
-			}
-
-			// Not enough silence yet to split, we continue.
-			if currSampleEnd-tempEndSpeech < minSilenceSamples {
-				continue
-			}
-
-			// enough silence
-			triggeredSpeech = false
-			endSample := tempEndSpeech + speechPadSamples
-			endSample = min(endSample, len(cleaned))
-			currEnd := endSample
-			currStartSilence = endSample
-			tempStartSpeech = 0
-			tempEndSpeech = 0
-			//slog.Debug("speech end", slog.Float64("endAt", speechEndAt))
-
-			segments = append(segments, RealtimeSegment{
-				Start: currStartSpeech,
-				End:   currEnd,
-			})
-		}
-	}
-
-	// close off current sample
-	if triggeredSpeech {
-		segments = append(segments, RealtimeSegment{
-			Start: currStartSpeech,
-			End:   len(cleaned),
-		})
-	} else {
-		// zero out silence, and record it as a segment
-		for j := currStartSilence; j < len(cleaned); j++ {
-			cleaned[j] = 0
-		}
-		segments = append(segments, RealtimeSegment{
-			Start:   currStartSilence,
-			End:     len(cleaned),
-			Silence: true,
-		})
-	}
-
-	return
 }
 
 func (sd *Detector) Reset() error {
