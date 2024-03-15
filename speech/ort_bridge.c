@@ -35,7 +35,7 @@ void OrtApiReleaseSessionOptions(OrtApi* api, OrtSessionOptions* opts) {
 }
 
 OrtStatus* OrtApiSetIntraOpNumThreads(OrtApi* api, OrtSessionOptions* opts, int intra_op_num_threads) {
-  return api->SetInterOpNumThreads(opts, intra_op_num_threads);
+  return api->SetIntraOpNumThreads(opts, intra_op_num_threads);
 }
 
 OrtStatus* OrtApiSetInterOpNumThreads(OrtApi* api, OrtSessionOptions* opts, int inter_op_num_threads) {
