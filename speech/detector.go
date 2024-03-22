@@ -220,11 +220,6 @@ func (sd *Detector) Detect(pcm []float32) ([]Segment, error) {
 		}
 	}
 
-	// Close off the current segment
-	if sd.triggered && len(segments) > 0 {
-		segments[len(segments)-1].SpeechEndAt = float64(len(pcm)) / float64(sd.cfg.SampleRate)
-	}
-
 	slog.Debug("speech detection done", slog.Int("segmentsLen", len(segments)))
 
 	return segments, nil
