@@ -14,8 +14,28 @@
 
 - [Golang](https://go.dev/doc/install) >= v1.21
 - A C compiler (e.g. GCC)
-- ONNX Runtime
-- A [Silero VAD](https://github.com/snakers4/silero-vad) model
+- ONNX Runtime (v1.16.2)
+- A [Silero VAD](https://github.com/snakers4/silero-vad) model (v5)
+
+### Development
+
+In order to build and/or run this library, you need to export (or pass) some env variables to point to the ONNX runtime files.
+
+#### Linux
+
+```sh
+LD_RUN_PATH="/usr/local/lib/onnxruntime-linux-x64-1.16.2/lib"
+LIBRARY_PATH="/usr/local/lib/onnxruntime-linux-x64-1.16.2/lib"
+C_INCLUDE_PATH="/usr/local/include/onnxruntime-linux-x64-1.16.2/include"
+```
+
+#### Darwin (MacOS)
+
+```sh
+LIBRARY_PATH="/usr/local/lib/onnxruntime-linux-x64-1.16.2/lib"
+C_INCLUDE_PATH="/usr/local/include/onnxruntime-linux-x64-1.16.2/include"
+sudo update_dyld_shared_cache
+```
 
 ### License
 
