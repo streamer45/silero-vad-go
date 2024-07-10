@@ -15,6 +15,33 @@ const (
 	stateLen = 2 * 1 * 128
 )
 
+type LogLevel int
+
+func (l LogLevel) OrtLoggingLevel() C.OrtLoggingLevel {
+	switch l {
+	case LevelVerbose:
+		return C.ORT_LOGGING_LEVEL_VERBOSE
+	case LogLevelInfo:
+		return C.ORT_LOGGING_LEVEL_INFO
+	case LogLevelWarn:
+		return C.ORT_LOGGING_LEVEL_WARNING
+	case LogLevelError:
+		return C.ORT_LOGGING_LEVEL_ERROR
+	case LogLevelFatal:
+		return C.ORT_LOGGING_LEVEL_FATAL
+	default:
+		return C.ORT_LOGGING_LEVEL_WARNING
+	}
+}
+
+const (
+	LevelVerbose LogLevel = iota + 1
+	LogLevelInfo
+	LogLevelWarn
+	LogLevelError
+	LogLevelFatal
+)
+
 type DetectorConfig struct {
 	// The path to the ONNX Silero VAD model file to load.
 	ModelPath string
@@ -26,6 +53,8 @@ type DetectorConfig struct {
 	MinSilenceDurationMs int
 	// The padding to add to speech segments to avoid aggressive cutting.
 	SpeechPadMs int
+	// The loglevel for the onnx environment, by default it is set to LogLevelWarn.
+	LogLevel LogLevel
 }
 
 func (c DetectorConfig) IsValid() error {
@@ -85,7 +114,7 @@ func NewDetector(cfg DetectorConfig) (*Detector, error) {
 	}
 
 	sd.cStrings["loggerName"] = C.CString("vad")
-	status := C.OrtApiCreateEnv(sd.api, C.ORT_LOGGING_LEVEL_WARNING, sd.cStrings["loggerName"], &sd.env)
+	status := C.OrtApiCreateEnv(sd.api, cfg.LogLevel.OrtLoggingLevel(), sd.cStrings["loggerName"], &sd.env)
 	defer C.OrtApiReleaseStatus(sd.api, status)
 	if status != nil {
 		return nil, fmt.Errorf("failed to create env: %s", C.GoString(C.OrtApiGetErrorMessage(sd.api, status)))
