@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	stateLen = 2 * 1 * 128
+	stateLen   = 2 * 1 * 128
+	contextLen = 64
 )
 
 type LogLevel int
@@ -92,6 +93,7 @@ type Detector struct {
 	cfg DetectorConfig
 
 	state [stateLen]float32
+	ctx   [contextLen]float32
 
 	currSample int
 	triggered  bool
@@ -259,6 +261,9 @@ func (sd *Detector) Reset() error {
 	sd.tempEnd = 0
 	for i := 0; i < stateLen; i++ {
 		sd.state[i] = 0
+	}
+	for i := 0; i < contextLen; i++ {
+		sd.ctx[i] = 0
 	}
 
 	return nil

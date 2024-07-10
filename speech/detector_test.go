@@ -117,13 +117,19 @@ func TestSpeechDetection(t *testing.T) {
 		require.NoError(t, sd.Destroy())
 	}()
 
-	data, err := os.ReadFile("../testfiles/samples.pcm")
-	require.NoError(t, err)
+	readSamplesFromFile := func(path string) []float32 {
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
 
-	samples := make([]float32, 0, len(data)/4)
-	for i := 0; i < len(data); i += 4 {
-		samples = append(samples, math.Float32frombits(binary.LittleEndian.Uint32(data[i:i+4])))
+		samples := make([]float32, 0, len(data)/4)
+		for i := 0; i < len(data); i += 4 {
+			samples = append(samples, math.Float32frombits(binary.LittleEndian.Uint32(data[i:i+4])))
+		}
+		return samples
 	}
+
+	samples := readSamplesFromFile("../testfiles/samples.pcm")
+	samples2 := readSamplesFromFile("../testfiles/samples2.pcm")
 
 	t.Run("detect", func(t *testing.T) {
 		segments, err := sd.Detect(samples)
@@ -131,16 +137,33 @@ func TestSpeechDetection(t *testing.T) {
 		require.NotEmpty(t, segments)
 		require.Equal(t, []Segment{
 			{
-				SpeechStartAt: 1.088,
+				SpeechStartAt: 1.056,
 				SpeechEndAt:   1.632,
 			},
 			{
-				SpeechStartAt: 2.912,
-				SpeechEndAt:   3.264,
+				SpeechStartAt: 2.88,
+				SpeechEndAt:   3.232,
 			},
 			{
 				SpeechStartAt: 4.448,
 				SpeechEndAt:   0,
+			},
+		}, segments)
+
+		err = sd.Reset()
+		require.NoError(t, err)
+
+		segments, err = sd.Detect(samples2)
+		require.NoError(t, err)
+		require.NotEmpty(t, segments)
+		require.Equal(t, []Segment{
+			{
+				SpeechStartAt: 3.008,
+				SpeechEndAt:   6.24,
+			},
+			{
+				SpeechStartAt: 7.072,
+				SpeechEndAt:   8.16,
 			},
 		}, segments)
 	})
@@ -154,12 +177,12 @@ func TestSpeechDetection(t *testing.T) {
 		require.NotEmpty(t, segments)
 		require.Equal(t, []Segment{
 			{
-				SpeechStartAt: 1.088,
+				SpeechStartAt: 1.056,
 				SpeechEndAt:   1.632,
 			},
 			{
-				SpeechStartAt: 2.912,
-				SpeechEndAt:   3.264,
+				SpeechStartAt: 2.88,
+				SpeechEndAt:   3.232,
 			},
 			{
 				SpeechStartAt: 4.448,
@@ -182,12 +205,12 @@ func TestSpeechDetection(t *testing.T) {
 		require.NotEmpty(t, segments)
 		require.Equal(t, []Segment{
 			{
-				SpeechStartAt: 1.088 - 0.01,
+				SpeechStartAt: 1.056 - 0.01,
 				SpeechEndAt:   1.632 + 0.01,
 			},
 			{
-				SpeechStartAt: 2.912 - 0.01,
-				SpeechEndAt:   3.264 + 0.01,
+				SpeechStartAt: 2.88 - 0.01,
+				SpeechEndAt:   3.232 + 0.01,
 			},
 			{
 				SpeechStartAt: 4.448 - 0.01,
