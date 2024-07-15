@@ -269,6 +269,10 @@ func (sd *Detector) Reset() error {
 	return nil
 }
 
+func (sd *Detector) SetThreshold(value float32) {
+	sd.cfg.Threshold = value
+}
+
 func (sd *Detector) Destroy() error {
 	if sd == nil {
 		return fmt.Errorf("invalid nil detector")
