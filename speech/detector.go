@@ -237,12 +237,15 @@ func (sd *Detector) Detect(pcm []float32) ([]Segment, error) {
 			sd.tempEnd = 0
 			sd.triggered = false
 			slog.Debug("speech end", slog.Float64("endAt", speechEndAt))
-
 			if len(segments) < 1 {
-				return nil, fmt.Errorf("unexpected speech end")
+				// return nil, fmt.Errorf("unexpected speech end")
+				// Fix: realtime streams coming at different packetization time like 20ms, always throws above error
+				segments = append(segments, Segment{
+					SpeechEndAt: speechEndAt,
+				})
+			} else {
+				segments[len(segments)-1].SpeechEndAt = speechEndAt
 			}
-
-			segments[len(segments)-1].SpeechEndAt = speechEndAt
 		}
 	}
 
