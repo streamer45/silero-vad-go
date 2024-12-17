@@ -251,6 +251,22 @@ func (sd *Detector) Detect(pcm []float32) ([]Segment, error) {
 	return segments, nil
 }
 
+func (sd *Detector) Infer(pcm []float32) (float32, error) {
+	if sd == nil {
+		return 0, fmt.Errorf("invalid nil detector")
+	}
+
+	windowSize := 512
+	if sd.cfg.SampleRate == 8000 {
+		windowSize = 256
+	}
+
+	if len(pcm) < windowSize {
+		return 0, fmt.Errorf("must be %d samplees", windowSize)
+	}
+	return sd.infer(pcm)
+}
+
 func (sd *Detector) Reset() error {
 	if sd == nil {
 		return fmt.Errorf("invalid nil detector")
