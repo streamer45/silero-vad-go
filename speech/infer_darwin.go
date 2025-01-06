@@ -12,7 +12,7 @@ import (
 	"unsafe"
 )
 
-func (sd *Detector) infer(pcm []float32) (float32, error) {
+func (sd *Detector) Infer(pcm []float32) (float32, error) {
 	// Create tensors
 	var pcmValue *C.OrtValue
 	pcmInputDims := []C.longlong{

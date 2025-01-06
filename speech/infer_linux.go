@@ -12,7 +12,7 @@ import (
 	"unsafe"
 )
 
-func (sd *Detector) infer(samples []float32) (float32, error) {
+func (sd *Detector) Infer(samples []float32) (float32, error) {
 	pcm := samples
 	if sd.currSample > 0 {
 		// Append context from previous iteration.
