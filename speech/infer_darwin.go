@@ -13,17 +13,8 @@ import (
 )
 
 func (sd *Detector) infer(samples []float32) (float32, error) {
-	pcm := samples
-	if sd.currSample > 0 {
-		// Append context from previous iteration.
-		pcm = append(sd.ctx[:], samples...)
-	}
-	ctxLen := contextLen
-	if sd.cfg.SampleRate == 8000 {
-		ctxLen = 32
-	}
-	// Save the last contextLen samples as context for the next iteration.
-	copy(sd.ctx[:], samples[len(samples)-ctxLen:])
+	pcm := append(sd.ctx[:], samples...)
+	copy(sd.ctx[:], samples[len(samples)-len(sd.ctx):])
 
 	// Create tensors
 	var pcmValue *C.OrtValue
