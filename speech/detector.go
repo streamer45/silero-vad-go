@@ -220,7 +220,7 @@ func (sd *Detector) Detect(pcm []float32) ([]Segment, error) {
 
 		if speechProb >= sd.cfg.Threshold {
 			if sd.tempEnd != 0 {
-				sd.tempEnd = sd.cfg.SampleRate
+				sd.tempEnd = 0
 			}
 
 			currentPos := float64(sd.currSample-windowSize-speechPadSamples) / float64(sd.cfg.SampleRate)
