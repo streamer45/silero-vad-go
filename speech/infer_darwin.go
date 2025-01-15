@@ -14,7 +14,6 @@ import (
 
 func (sd *Detector) infer(samples []float32) (float32, error) {
 	pcm := append(sd.ctx[:], samples...)
-	copy(sd.ctx[:], samples[len(samples)-len(sd.ctx):])
 
 	// Create tensors
 	var pcmValue *C.OrtValue

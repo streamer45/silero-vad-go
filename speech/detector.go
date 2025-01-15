@@ -53,7 +53,7 @@ type DetectorConfig struct {
 	// The duration of silence to wait for each speech segment before separating it.
 	MinSilenceDurationMs int
 	// The duration of speech chunk to include into speech segments
-	MinSpeechSamplesMs int
+	MinSpeechMs int
 	// The padding to add to speech segments to avoid aggressive cutting.
 	SpeechPadMs int
 	// The loglevel for the onnx environment, by default it is set to LogLevelWarn.
@@ -77,8 +77,8 @@ func (c DetectorConfig) IsValid() error {
 		return fmt.Errorf("invalid MinSilenceDurationMs: should be a positive number")
 	}
 
-	if c.MinSpeechSamplesMs < 0 {
-		return fmt.Errorf("invalid MinSpeechSamplesMs: should be a positive number")
+	if c.MinSpeechMs < 0 {
+		return fmt.Errorf("invalid MinSpeechMs: should be a positive number")
 	}
 
 	if c.SpeechPadMs < 0 {
@@ -223,7 +223,7 @@ func (sd *Detector) Detect(pcm []float32) ([]Segment, error) {
 				sd.tempEnd = 0
 			}
 
-			currentPos := float64(sd.currSample-windowSize-speechPadSamples) / float64(sd.cfg.SampleRate)
+			currentPos := float64(sd.currSample-windowSize) / float64(sd.cfg.SampleRate)
 			if !sd.triggered {
 				sd.triggered = true
 				speechStartAt := currentPos
@@ -236,19 +236,18 @@ func (sd *Detector) Detect(pcm []float32) ([]Segment, error) {
 				slog.Debug("speech start", slog.Float64("startAt", speechStartAt))
 				sd.currSpeechStartAt = speechStartAt
 			}
-			if sd.currSpeechStartAt > 0 && (currentPos-sd.currSpeechStartAt)*1000 > float64(sd.cfg.MinSpeechSamplesMs) {
+			if sd.currSpeechStartAt > 0 && int((currentPos-sd.currSpeechStartAt)*1000) >= sd.cfg.MinSpeechMs {
 				sd.currSegment = &Segment{
-					SpeechStartAt: sd.currSpeechStartAt,
+					SpeechStartAt: sd.currSpeechStartAt - float64(sd.cfg.SpeechPadMs)/1000,
 				}
 				sd.currSpeechStartAt = 0
 				segments = append(segments, *sd.currSegment)
 			}
-
 		}
 
 		if speechProb < (sd.cfg.Threshold-0.15) && sd.triggered {
 			if sd.tempEnd == 0 {
-				sd.tempEnd = sd.currSample
+				sd.tempEnd = sd.currSample - windowSize*2
 			}
 
 			// Not enough silence yet to split, we continue.
@@ -256,7 +255,7 @@ func (sd *Detector) Detect(pcm []float32) ([]Segment, error) {
 				continue
 			}
 
-			speechEndAt := (float64(sd.tempEnd+speechPadSamples-minSilenceSamples) / float64(sd.cfg.SampleRate))
+			speechEndAt := float64(sd.tempEnd+speechPadSamples) / float64(sd.cfg.SampleRate)
 			sd.tempEnd = 0
 			sd.triggered = false
 			slog.Debug("speech end", slog.Float64("endAt", speechEndAt))
