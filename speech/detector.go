@@ -52,6 +52,8 @@ type DetectorConfig struct {
 	Threshold float32
 	// The duration of silence to wait for each speech segment before separating it.
 	MinSilenceDurationMs int
+	// The duration of speech chunk to include into speech segments
+	MinSpeechMs int
 	// The padding to add to speech segments to avoid aggressive cutting.
 	SpeechPadMs int
 	// The loglevel for the onnx environment, by default it is set to LogLevelWarn.
@@ -75,6 +77,10 @@ func (c DetectorConfig) IsValid() error {
 		return fmt.Errorf("invalid MinSilenceDurationMs: should be a positive number")
 	}
 
+	if c.MinSpeechMs < 0 {
+		return fmt.Errorf("invalid MinSpeechMs: should be a positive number")
+	}
+
 	if c.SpeechPadMs < 0 {
 		return fmt.Errorf("invalid SpeechPadMs: should be a positive number")
 	}
@@ -93,21 +99,29 @@ type Detector struct {
 	cfg DetectorConfig
 
 	state [stateLen]float32
-	ctx   [contextLen]float32
+	ctx   []float32
 
 	currSample int
 	triggered  bool
 	tempEnd    int
+
+	currSpeechStartAt float64
+	currSegment       *Segment
 }
 
 func NewDetector(cfg DetectorConfig) (*Detector, error) {
 	if err := cfg.IsValid(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
+	ctxLen := contextLen
+	if cfg.SampleRate == 8000 {
+		ctxLen = 32
+	}
 
 	sd := Detector{
 		cfg:      cfg,
 		cStrings: map[string]*C.char{},
+		ctx:      make([]float32, ctxLen),
 	}
 
 	sd.api = C.OrtGetApi()
@@ -196,7 +210,7 @@ func (sd *Detector) Detect(pcm []float32) ([]Segment, error) {
 	speechPadSamples := sd.cfg.SpeechPadMs * sd.cfg.SampleRate / 1000
 
 	var segments []Segment
-	for i := 0; i < len(pcm)-windowSize; i += windowSize {
+	for i := 0; i <= len(pcm)-windowSize; i += windowSize {
 		speechProb, err := sd.infer(pcm[i : i+windowSize])
 		if err != nil {
 			return nil, fmt.Errorf("infer failed: %w", err)
@@ -204,28 +218,36 @@ func (sd *Detector) Detect(pcm []float32) ([]Segment, error) {
 
 		sd.currSample += windowSize
 
-		if speechProb >= sd.cfg.Threshold && sd.tempEnd != 0 {
-			sd.tempEnd = 0
-		}
-
-		if speechProb >= sd.cfg.Threshold && !sd.triggered {
-			sd.triggered = true
-			speechStartAt := (float64(sd.currSample-windowSize-speechPadSamples) / float64(sd.cfg.SampleRate))
-
-			// We clamp at zero since due to padding the starting position could be negative.
-			if speechStartAt < 0 {
-				speechStartAt = 0
+		if speechProb >= sd.cfg.Threshold {
+			if sd.tempEnd != 0 {
+				sd.tempEnd = 0
 			}
 
-			slog.Debug("speech start", slog.Float64("startAt", speechStartAt))
-			segments = append(segments, Segment{
-				SpeechStartAt: speechStartAt,
-			})
+			currentPos := float64(sd.currSample-windowSize) / float64(sd.cfg.SampleRate)
+			if !sd.triggered {
+				sd.triggered = true
+				speechStartAt := currentPos
+
+				// We clamp at zero since due to padding the starting position could be negative.
+				if speechStartAt < 0 {
+					speechStartAt = 0
+				}
+
+				slog.Debug("speech start", slog.Float64("startAt", speechStartAt))
+				sd.currSpeechStartAt = speechStartAt
+			}
+			if sd.currSpeechStartAt > 0 && int((currentPos-sd.currSpeechStartAt)*1000) >= sd.cfg.MinSpeechMs {
+				sd.currSegment = &Segment{
+					SpeechStartAt: sd.currSpeechStartAt - float64(sd.cfg.SpeechPadMs)/1000,
+				}
+				sd.currSpeechStartAt = 0
+				segments = append(segments, *sd.currSegment)
+			}
 		}
 
 		if speechProb < (sd.cfg.Threshold-0.15) && sd.triggered {
 			if sd.tempEnd == 0 {
-				sd.tempEnd = sd.currSample
+				sd.tempEnd = sd.currSample - windowSize*2
 			}
 
 			// Not enough silence yet to split, we continue.
@@ -233,13 +255,19 @@ func (sd *Detector) Detect(pcm []float32) ([]Segment, error) {
 				continue
 			}
 
-			speechEndAt := (float64(sd.tempEnd+speechPadSamples) / float64(sd.cfg.SampleRate))
+			speechEndAt := float64(sd.tempEnd+speechPadSamples) / float64(sd.cfg.SampleRate)
 			sd.tempEnd = 0
 			sd.triggered = false
 			slog.Debug("speech end", slog.Float64("endAt", speechEndAt))
 
 			if len(segments) < 1 {
-				return nil, fmt.Errorf("unexpected speech end")
+				if sd.currSegment != nil {
+					segments = append(segments, *sd.currSegment)
+					sd.currSegment = nil
+				} else {
+					slog.Debug("unexpected speech end")
+					return nil, nil
+				}
 			}
 
 			segments[len(segments)-1].SpeechEndAt = speechEndAt
