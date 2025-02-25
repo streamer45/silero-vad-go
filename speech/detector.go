@@ -197,7 +197,7 @@ func (sd *Detector) Detect(pcm []float32) ([]Segment, error) {
 
 	var segments []Segment
 	for i := 0; i < len(pcm)-windowSize; i += windowSize {
-		speechProb, err := sd.infer(pcm[i : i+windowSize])
+		speechProb, err := sd.Infer(pcm[i : i+windowSize])
 		if err != nil {
 			return nil, fmt.Errorf("infer failed: %w", err)
 		}
